@@ -13,7 +13,7 @@ from fastapi import FastAPI
 
 from config import Config
 from helpers.logger import setup_logger
-from helpers.saver import DataSaver
+from helpers.saver import DataSaver, normalize_ticker
 
 app = FastAPI(title="NexusFeed API", version="0.1.0")
 
@@ -66,15 +66,18 @@ async def fetch_loop(
                     price,
                 )
 
-                record = {
-                    "timestamp": ticker.get("datetime") or datetime.now(timezone.utc).isoformat(),
-                    "exchange": exchange.exchange_name,
-                    "symbol": symbol,
-                    "price": price,
-                }
+                # Prepare ticker data with symbol and timestamp
+                ticker_data = dict(ticker)
+                ticker_data["symbol"] = symbol
+                if "timestamp" not in ticker_data and "datetime" not in ticker_data:
+                    ticker_data["timestamp"] = datetime.now(timezone.utc).isoformat()
+                
+                # Normalize ticker data before saving
+                normalized_data = normalize_ticker(ticker_data, exchange.exchange_name)
+                
                 await asyncio.to_thread(
                     saver.save_csv,
-                    record,
+                    normalized_data,
                     f"{exchange.exchange_name}_ticker",
                 )
             except ccxt.NetworkError as exc:
@@ -206,15 +209,18 @@ async def fetch_once() -> None:
                         price,
                     )
                     
-                    record = {
-                        "timestamp": ticker.get("datetime") or datetime.now(timezone.utc).isoformat(),
-                        "exchange": exch.exchange_name,
-                        "symbol": sym,
-                        "price": price,
-                    }
+                    # Prepare ticker data with symbol and timestamp
+                    ticker_data = dict(ticker)
+                    ticker_data["symbol"] = sym
+                    if "timestamp" not in ticker_data and "datetime" not in ticker_data:
+                        ticker_data["timestamp"] = datetime.now(timezone.utc).isoformat()
+                    
+                    # Normalize ticker data before saving
+                    normalized_data = normalize_ticker(ticker_data, exch.exchange_name)
+                    
                     await asyncio.to_thread(
                         saver_instance.save_csv,
-                        record,
+                        normalized_data,
                         f"{exch.exchange_name}_ticker",
                     )
                 except ccxt.NetworkError as exc:
@@ -425,15 +431,18 @@ async def fetch_ticker(exchange_name: str, symbol: str):
         
         # Save the data if saver is available
         if saver_instance:
-            record = {
-                "timestamp": ticker.get("datetime") or datetime.now(timezone.utc).isoformat(),
-                "exchange": exchange.exchange_name,
-                "symbol": symbol,
-                "price": price,
-            }
+            # Prepare ticker data with symbol and timestamp
+            ticker_data = dict(ticker)
+            ticker_data["symbol"] = symbol
+            if "timestamp" not in ticker_data and "datetime" not in ticker_data:
+                ticker_data["timestamp"] = datetime.now(timezone.utc).isoformat()
+            
+            # Normalize ticker data before saving
+            normalized_data = normalize_ticker(ticker_data, exchange.exchange_name)
+            
             await asyncio.to_thread(
                 saver_instance.save_json,
-                record,
+                normalized_data,
                 f"{exchange.exchange_name}_ticker",
             )
         

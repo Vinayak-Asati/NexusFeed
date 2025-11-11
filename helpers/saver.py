@@ -7,6 +7,25 @@ from typing import Any, Dict
 import pandas as pd
 
 
+def normalize_ticker(data: Dict[str, Any], source: str) -> Dict[str, Any]:
+    """
+    Normalize ticker data into a simplified JSON structure.
+    
+    Args:
+        data: Dictionary containing ticker data with keys like "symbol", "last", "timestamp"
+        source: Source exchange name (e.g., "binance", "deribit")
+    
+    Returns:
+        Normalized dictionary with keys: source, symbol, price, timestamp
+    """
+    return {
+        "source": source,
+        "symbol": data.get("symbol", ""),
+        "price": data.get("last") or data.get("close") or data.get("price", ""),
+        "timestamp": data.get("timestamp") or data.get("datetime", ""),
+    }
+
+
 class DataSaver:
     """Utility class for saving data in JSON or CSV format."""
 
