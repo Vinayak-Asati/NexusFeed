@@ -1,12 +1,12 @@
-"""Binance exchange connector."""
+"""OKX exchange connector."""
 
 from typing import Optional, Sequence
 
 from .base_exchange import BaseExchange
 
 
-class BinanceExchange(BaseExchange):
-    """Binance exchange connector."""
+class OKXExchange(BaseExchange):
+    """OKX exchange connector."""
 
     def __init__(
         self,
@@ -15,9 +15,9 @@ class BinanceExchange(BaseExchange):
         api_secret: Optional[str] = None,
         sandbox: bool = False,
     ):
-        """Initialize Binance exchange connector."""
+        """Initialize OKX exchange connector."""
         super().__init__(
-            "binance",
+            "okx",
             symbols=symbols,
             api_key=api_key,
             api_secret=api_secret,

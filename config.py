@@ -14,15 +14,20 @@ class Config:
     RAW_DATA_DIR = DATA_DIR / "raw"
     LOGS_DIR = DATA_DIR / "logs"
     
-    # Exchange API credentials (load from environment variables)
-    BINANCE_API_KEY: Optional[str] = os.getenv("BINANCE_API_KEY")
-    BINANCE_API_SECRET: Optional[str] = os.getenv("BINANCE_API_SECRET")
-    
-    COINBASE_API_KEY: Optional[str] = os.getenv("COINBASE_API_KEY")
-    COINBASE_API_SECRET: Optional[str] = os.getenv("COINBASE_API_SECRET")
-    
-    KRAKEN_API_KEY: Optional[str] = os.getenv("KRAKEN_API_KEY")
-    KRAKEN_API_SECRET: Optional[str] = os.getenv("KRAKEN_API_SECRET")
+    # Generic exchange API credentials loader (from environment variables)
+    @staticmethod
+    def get_exchange_credentials(exchange_name: str) -> dict:
+        """
+        Get API credentials for a given exchange from environment variables.
+        Looks for environment variables in the form:
+        - {EXCHANGE_NAME}_API_KEY
+        - {EXCHANGE_NAME}_API_SECRET
+        """
+        env_prefix = exchange_name.upper()
+        return {
+            "api_key": os.getenv(f"{env_prefix}_API_KEY"),
+            "api_secret": os.getenv(f"{env_prefix}_API_SECRET"),
+        }
     
     # Database configuration
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///data/nexusfeed.db")

@@ -1,0 +1,34 @@
+[tool.poetry]
+name = "nexusfeed"
+version = "0.1.0"
+description = "NexusFeed: Market Data Aggregator & Normalizer"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [{ include = "api" }, { include = "helpers" }, { include = "exchanges" }]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.30.0"}
+ccxt = ">=4.4.89"
+ccxtpro = ">=1.0.1"
+aiohttp = ">=3.10.0"
+websockets = ">=11.0.0"
+pandas = ">=2.2.3"
+sqlalchemy = ">=2.0.0"
+redis = ">=5.0.0"
+pydantic = ">=2.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+black = "^24.0.0"
+flake8 = "^7.0.0"
+
+[tool.poetry.scripts]
+nexusfeed = "main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+

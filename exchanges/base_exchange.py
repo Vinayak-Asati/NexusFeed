@@ -1,24 +1,31 @@
 """Generic wrapper for ccxt exchanges."""
 
 import ccxt
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Sequence
 
 
 class BaseExchange:
     """Base class for exchange connectors using ccxt."""
     
-    def __init__(self, exchange_name: str, api_key: Optional[str] = None, 
-                 api_secret: Optional[str] = None, sandbox: bool = False):
+    def __init__(
+        self,
+        exchange_name: str,
+        symbols: Optional[Sequence[str]] = None,
+        api_key: Optional[str] = None,
+        api_secret: Optional[str] = None,
+        sandbox: bool = False,
+    ):
         """
         Initialize exchange connector.
         
         Args:
-            exchange_name: Name of the exchange (e.g., 'binance', 'coinbase')
+            exchange_name: Name of the exchange (e.g., 'binance', 'okx')
             api_key: API key for authenticated requests
             api_secret: API secret for authenticated requests
             sandbox: Whether to use sandbox/testnet mode
         """
         self.exchange_name = exchange_name
+        self.symbols = list(symbols) if symbols is not None else []
         self.sandbox = sandbox
         
         # Initialize ccxt exchange
