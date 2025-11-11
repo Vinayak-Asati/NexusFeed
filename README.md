@@ -2,173 +2,369 @@
 
 ## Overview
 
-The **Market Data Aggregator & Normalizer** is a real-time data ingestion and normalization system designed to collect, standardize, and distribute live market data from multiple cryptocurrency exchanges (e.g., Binance, Coinbase, Bybit).
+**NexusFeed** is a real-time cryptocurrency market data aggregator that collects, normalizes, and stores ticker data from multiple exchanges. The system connects to various exchange APIs concurrently, fetches market data at configurable intervals, and saves the data in standardized CSV and JSON formats.
 
-The system connects to multiple exchange WebSocket APIs concurrently, normalizes varying message formats into a unified schema, stores historical data in PostgreSQL, caches live data in Redis, and exposes a unified WebSocket + REST API for clients.
+### Purpose
 
-## Goals & Objectives
+- **Aggregate** real-time market data from multiple cryptocurrency exchanges (Binance, Deribit, Bybit, OKX, etc.)
+- **Normalize** exchange-specific data formats into a unified schema
+- **Store** historical ticker data in CSV and JSON formats for analysis
+- **Provide** a REST API for querying exchange status and fetching ticker data
+- **Enable** debugging and testing with a one-time fetch mode
 
-* Stream real-time market data (trades, tickers, order books) from **multiple exchanges**.
-* Normalize exchange-specific message schemas into a **unified data model**.
-* Store normalized historical data in **PostgreSQL**.
-* Cache live data in **Redis** for instant retrieval and broadcasting.
-* Expose **REST API** for historical queries and **WebSocket API** for live streams.
-* Design for **modularity, scalability, and low latency**.
-* Ensure **clean code, CI/CD, logging, and test coverage**.
-
-## Tech Stack
-
-| Component                | Technology                   |
-| ------------------------ | ---------------------------- |
-| **Language**             | Python 3.10+                 |
-| **Web Framework**        | FastAPI                      |
-| **Concurrency**          | asyncio, aiohttp, websockets |
-| **Database**             | PostgreSQL                   |
-| **Cache / Pub-Sub**      | Redis                        |
-| **ORM**                  | SQLAlchemy or Tortoise ORM   |
-| **Schema Validation**    | Pydantic                     |
-| **Testing**              | pytest                       |
-| **Deployment**           | Docker + docker-compose      |
-| **CI/CD**                | GitHub Actions               |
-| **Linting / Formatting** | flake8, black                |
-
-## System Architecture
-
-### High-Level Flow
-
-```
-Exchange WebSocket Streams
-       ↓
-  [Exchange Connectors]
-       ↓
-  [Normalization Layer]
-       ↓
-  [Broadcast Layer]
-       ↓
-  ├─ Redis Cache (live data)
-  ├─ PostgreSQL (historical storage)
-  └─ FastAPI (REST + WebSocket APIs)
-```
-
-### Components
-
-1. **Exchange Stream Layer**
-   * Async modules for Binance, Coinbase, Bybit, etc.
-   * Handles WebSocket connection, message parsing, reconnection logic, and data push to normalizer
-
-2. **Normalization Layer**
-   * Converts raw exchange messages into a standard schema
-   * Validates using Pydantic models
-
-3. **Broadcast Layer**
-   * Publishes normalized data to Redis Pub/Sub
-   * Feeds WebSocket endpoints for live updates
-
-4. **Storage Layer**
-   * Periodically stores tick or trade snapshots into PostgreSQL
-   * Supports queryable historical data
-
-5. **API Layer**
-   * REST API: Query market history, symbols, and stats
-   * WebSocket API: Subscribe to real-time updates
-
-## Project Structure
+## Folder Structure
 
 ```
 NexusFeed/
- ┣ main.py                  # Application entrypoint (logging + bootstrapping)
- ┣ config.py                # Configuration and paths (env, dirs, logging)
- ┣ requirements.txt         # Python dependencies
- ┣ README.md
- ┣ helpers/
- ┃ ┣ __init__.py
- ┃ ┣ logger.py              # Centralized logging setup
- ┃ ┗ saver.py               # Persistence helpers (WIP/utility)
- ┣ exchanges/
- ┃ ┣ __init__.py
- ┃ ┣ base_exchange.py       # Base exchange class / interface
- ┃ ┣ binance.py             # Binance connector (WIP/placeholder)
- ┃ ┗ deribit.py             # Deribit connector (WIP/placeholder)
- ┗ data/
-   ┣ logs/                  # Runtime logs (e.g., nexusfeed.log)
-   ┗ raw/                   # Raw data storage
+├── main.py                  # Application entrypoint with CLI and async fetch loops
+├── config.py                # Configuration settings (exchanges, intervals, paths)
+├── pyproject.toml           # Poetry dependencies and project metadata
+├── poetry.lock              # Locked dependency versions
+├── README.md                # This file
+├── .gitignore               # Git ignore patterns
+├── exchanges/               # Exchange connector modules
+│   ├── __init__.py
+│   ├── base_exchange.py     # Base exchange class using ccxt
+│   ├── binance.py           # Binance exchange connector
+│   ├── deribit.py           # Deribit exchange connector
+│   ├── bybit.py             # Bybit exchange connector
+│   └── okx.py               # OKX exchange connector
+├── helpers/                 # Utility modules
+│   ├── __init__.py
+│   ├── logger.py            # Centralized logging setup
+│   └── saver.py             # Data persistence utilities (CSV/JSON)
+└── data/                    # Data storage directory
+    ├── raw/                 # Raw ticker data (CSV/JSON files)
+    └── logs/                # Application logs (if enabled)
 ```
 
-## Current Status
+## Installation
 
-- Core entrypoint (`main.py`), configuration (`config.py`), and logging are implemented.
-- Exchange connectors exist as stubs/early implementations (`exchanges/`).
-- Database, Redis, REST/WebSocket APIs, and normalization/storage services are planned but not yet added in this repository layout.
+### Prerequisites
 
-## API Specification
+- Python 3.10 or higher
+- Poetry (recommended) or pip
 
-### REST Endpoints
+### Using Poetry (Recommended)
 
-| Method | Endpoint                           | Description             |
-| ------ | ---------------------------------- | ----------------------- |
-| GET    | `/api/v1/markets/{symbol}/history` | Fetch historical trades |
-| GET    | `/api/v1/markets`                  | List supported symbols  |
-| GET    | `/health`                          | Health check            |
+1. **Install Poetry** (if not already installed):
+   ```bash
+   curl -sSL https://install.python-poetry.org | python3 -
+   ```
 
-### WebSocket Endpoint
+2. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd NexusFeed
+   ```
 
-| Endpoint               | Description                      |
-| ---------------------- | -------------------------------- |
-| `/ws/markets/{symbol}` | Subscribe to live market updates |
+3. **Install dependencies**:
+   ```bash
+   poetry install
+   ```
 
-## Getting Started
+4. **Activate the Poetry shell**:
+   ```bash
+   poetry shell
+   ```
 
-1. Clone the repository
-2. Ensure Python 3.10+ is installed (`python3 --version`)
-3. Create and activate a virtual environment (recommended)
-   - Linux/WSL2:
-     - `python3 -m venv .venv`
-     - `source .venv/bin/activate`
-4. Install dependencies: `pip install -r requirements.txt`
-5. (Optional) Export environment variables (see Configuration below)
-6. Run the application: `python main.py`
-7. Logs will appear in `data/logs/nexusfeed.log`
+### Using pip
 
-## How to Run (Step-by-Step)
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd NexusFeed
+   ```
 
-1) Clone and enter the project directory
-   - `git clone <your-repo-url>`
-   - `cd NexusFeed`
+2. **Create a virtual environment**:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
 
-2) Create and activate a virtual environment (recommended)
-   - `python3 -m venv .venv`
-   - `source .venv/bin/activate`
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+   (Note: If `requirements.txt` doesn't exist, install from `pyproject.toml` or manually install: `pip install fastapi uvicorn ccxt pandas`)
 
-3) Upgrade pip and install dependencies
-   - `python -m pip install --upgrade pip`
-   - `pip install -r requirements.txt`
+## Usage
 
-4) Configure environment variables (optional, for APIs/DB/Redis)
-   - Exchange API keys (only if you need authenticated endpoints):
-     - For example, to configure API credentials for an exchange (replace "BINANCE" with your exchange name):
-       - `export BINANCE_API_KEY="<your_api_key>"`
-       - `export BINANCE_API_SECRET="<your_api_secret>"`
-     - NexusFeed will automatically load these credentials for the selected exchange.
-   - Database (defaults to local SQLite under `data/`):
-     - `export DATABASE_URL="sqlite:///data/nexusfeed.db"`
-   - Redis (only if using Redis locally or remotely):
-     - `export REDIS_HOST=localhost`
-     - `export REDIS_PORT=6379`
-     - `export REDIS_DB=0`
-   - Logging:
-     - `export LOG_LEVEL=INFO`
+### Continuous Mode (Default)
 
-5) Run the application
-   - `python main.py`
+Run the application to continuously fetch ticker data from all configured exchanges:
 
-6) Verify startup
-   - Check the log file: `tail -f data/logs/nexusfeed.log`
+```bash
+# Using Python directly
+python3 main.py
 
-7) Deactivate the virtual environment (when done)
-   - `deactivate`
+# Using Poetry
+poetry run python main.py
+
+# Or if using Poetry scripts
+poetry run nexusfeed
+```
+
+The application will:
+- Clear existing data files in `data/raw/`
+- Start fetching ticker data for all configured symbols
+- Save data to CSV files (`{exchange}_ticker.csv`)
+- Run indefinitely until interrupted (Ctrl+C)
+
+### One-Time Fetch Mode (Debugging)
+
+Use the `--once` flag to fetch ticker data once for all symbols and exit:
+
+```bash
+# Using Python directly
+python3 main.py --once
+
+# Using Poetry
+poetry run python main.py --once
+```
+
+This mode is useful for:
+- Testing exchange connections
+- Debugging data fetching issues
+- Quick data snapshots
+- Verifying configuration
+
+### Running as FastAPI Server
+
+The application also includes a FastAPI server with REST endpoints:
+
+```bash
+# Start the server
+uvicorn main:app --reload
+
+# Or with Poetry
+poetry run uvicorn main:app --reload
+```
+
+Access the API at `http://localhost:8000`:
+- API Documentation: `http://localhost:8000/docs`
+- Health Check: `http://localhost:8000/health`
+- List Exchanges: `http://localhost:8000/api/exchanges`
+- Exchange Status: `http://localhost:8000/api/exchanges/status`
+- Fetch Ticker: `http://localhost:8000/api/exchanges/{exchange_name}/ticker/{symbol}`
+
+## Configuration
+
+Configuration is managed in `config.py`. Key settings include:
+
+### Exchange Configuration
+
+Edit `Config.EXCHANGES` to configure which exchanges and symbols to monitor:
+
+```python
+EXCHANGES: dict = {
+    "binance": ["BTC/USDT", "ETH/USDT"],
+    "deribit": ["BTC/USDT", "ETH/USDT"],
+    "bybit": ["BTC/USDT", "ETH/USDT"],
+    "okx": ["BTC/USDT", "ETH/USDT"],  # Comment out to disable
+}
+```
+
+### Refresh Interval
+
+Set the data fetching interval (in seconds) via `Config.REFRESH_INTERVAL`:
+
+```python
+REFRESH_INTERVAL: int = int(os.getenv("REFRESH_INTERVAL", "5"))  # Default: 5 seconds
+```
+
+Or set via environment variable:
+```bash
+export REFRESH_INTERVAL=10  # Fetch every 10 seconds
+```
+
+### Environment Variables
+
+Configure the application using environment variables:
+
+#### Exchange API Credentials (Optional)
+Only needed for authenticated endpoints:
+```bash
+export BINANCE_API_KEY="your_api_key"
+export BINANCE_API_SECRET="your_api_secret"
+export DERIBIT_API_KEY="your_api_key"
+export DERIBIT_API_SECRET="your_api_secret"
+# ... similar for other exchanges
+```
+
+#### Application Settings
+```bash
+# Logging
+export LOG_LEVEL="INFO"  # Options: DEBUG, INFO, WARNING, ERROR
+
+# Sandbox/Test Mode
+export SANDBOX_MODE="true"  # Use exchange sandbox/testnet
+
+# Debug Mode
+export DEBUG="true"
+
+# Refresh Interval
+export REFRESH_INTERVAL="5"  # Seconds between fetches
+```
+
+#### Database & Redis (Future Use)
+```bash
+export DATABASE_URL="sqlite:///data/nexusfeed.db"
+export REDIS_HOST="localhost"
+export REDIS_PORT="6379"
+export REDIS_DB="0"
+```
+
+### Configuration File Structure
+
+```python
+class Config:
+    # Base paths
+    BASE_DIR = Path(__file__).parent
+    DATA_DIR = BASE_DIR / "data"
+    RAW_DATA_DIR = DATA_DIR / "raw"
+    LOGS_DIR = DATA_DIR / "logs"
+    
+    # Refresh interval (seconds)
+    REFRESH_INTERVAL: int = 5
+    
+    # Exchange configuration
+    EXCHANGES: dict = {
+        "binance": ["BTC/USDT", "ETH/USDT"],
+        # ... more exchanges
+    }
+    
+    # Application settings
+    DEBUG: bool = False
+    SANDBOX_MODE: bool = False
+    LOG_LEVEL: str = "INFO"
+```
+
+## Data Output
+
+### CSV Files
+
+Ticker data is saved to CSV files in `data/raw/` with the naming pattern:
+- `{exchange_name}_ticker.csv`
+
+**Example: `binance_ticker.csv`**
+```csv
+timestamp,exchange,symbol,price
+2024-01-15T10:30:00.000Z,binance,BTC/USDT,42500.50
+2024-01-15T10:30:05.000Z,binance,ETH/USDT,2650.75
+2024-01-15T10:30:10.000Z,binance,BTC/USDT,42510.25
+```
+
+**CSV Format:**
+- **timestamp**: ISO 8601 UTC timestamp
+- **exchange**: Exchange name (e.g., "binance", "deribit")
+- **symbol**: Trading pair (e.g., "BTC/USDT")
+- **price**: Last traded price
+
+### JSON Files
+
+When using the REST API endpoint `/api/exchanges/{exchange_name}/ticker/{symbol}`, data is also saved to JSON files:
+- `{exchange_name}_ticker.json`
+
+**Example: `binance_ticker.json`**
+```json
+[
+  {
+    "timestamp": "2024-01-15T10:30:00.000Z",
+    "exchange": "binance",
+    "symbol": "BTC/USDT",
+    "price": "42500.50"
+  },
+  {
+    "timestamp": "2024-01-15T10:30:05.000Z",
+    "exchange": "binance",
+    "symbol": "ETH/USDT",
+    "price": "2650.75"
+  }
+]
+```
+
+**JSON Format:**
+- Array of objects, each containing:
+  - `timestamp`: ISO 8601 UTC timestamp
+  - `exchange`: Exchange name
+  - `symbol`: Trading pair
+  - `price`: Last traded price
+
+### Data Management
+
+- **Automatic Cleanup**: On startup, all existing CSV and JSON files in `data/raw/` are automatically cleared to start a fresh session
+- **Append Mode**: New data is appended to existing files during the session
+- **File Location**: All data files are stored in `data/raw/` directory
+
+## API Endpoints
+
+### REST API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | Root endpoint with API information |
+| GET | `/health` | Health check endpoint |
+| GET | `/api/exchanges` | List all configured exchanges |
+| GET | `/api/exchanges/status` | Get status and connectivity for all exchanges |
+| GET | `/api/exchanges/{exchange_name}/ticker/{symbol}` | Fetch ticker data for a specific exchange and symbol |
+
+### Example API Requests
+
+```bash
+# List all exchanges
+curl http://localhost:8000/api/exchanges
+
+# Get exchange status
+curl http://localhost:8000/api/exchanges/status
+
+# Fetch ticker for Binance BTC/USDT
+curl http://localhost:8000/api/exchanges/binance/ticker/BTC/USDT
+
+# Or using symbol without slash
+curl http://localhost:8000/api/exchanges/binance/ticker/BTCUSDT
+```
 
 ## Development
 
-- Run tests: `pytest`
-- Format code: `black .`
-- Lint code: `flake8`
+### Running Tests
+```bash
+poetry run pytest
+```
+
+### Code Formatting
+```bash
+poetry run black .
+```
+
+### Linting
+```bash
+poetry run flake8
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Import Errors**: Ensure all dependencies are installed (`poetry install` or `pip install -r requirements.txt`)
+
+2. **Exchange Connection Errors**: 
+   - Check internet connectivity
+   - Verify exchange names in `Config.EXCHANGES` match available exchange modules
+   - Some exchanges may require API credentials even for public endpoints
+
+3. **Data Not Saving**: 
+   - Check that `data/raw/` directory exists and is writable
+   - Verify file permissions
+
+4. **Rate Limiting**: 
+   - Increase `REFRESH_INTERVAL` if hitting exchange rate limits
+   - Some exchanges have strict rate limits on public endpoints
+
+## License
+
+[Add your license information here]
+
+## Contributing
+
+[Add contribution guidelines here]

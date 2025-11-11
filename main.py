@@ -1,5 +1,6 @@
 """Main entry point for NexusFeed application."""
 
+import argparse
 import asyncio
 import importlib
 import logging
@@ -166,8 +167,96 @@ def get_exchanges() -> Sequence:
     return exchanges
 
 
-async def main() -> None:
-    """Run concurrent fetch loops for the configured exchanges."""
+async def fetch_once() -> None:
+    """Fetch ticker data once for all symbols on all exchanges and exit."""
+    global logger_instance, saver_instance, exchanges_list
+    
+    logger_instance = initialize()
+    saver_instance = DataSaver(base_path=str(Config.RAW_DATA_DIR))
+    
+    # Clear existing data before starting new session
+    deleted_count = saver_instance.clear_data()
+    if deleted_count > 0:
+        logger_instance.info("Cleared %d existing data files from previous session.", deleted_count)
+    
+    exchanges_list = get_exchanges()
+    
+    if not exchanges_list:
+        logger_instance.warning("No exchanges configured.")
+        return
+    
+    logger_instance.info("Fetching ticker data once for all symbols...")
+    
+    # Fetch all symbols from all exchanges concurrently
+    tasks = []
+    for exchange in exchanges_list:
+        if not exchange.symbols:
+            logger_instance.warning("Exchange %s has no symbols configured.", exchange.exchange_name)
+            continue
+        
+        for symbol in exchange.symbols:
+            async def fetch_single_ticker(exch, sym):
+                try:
+                    ticker = await asyncio.to_thread(exch.get_ticker, sym)
+                    price = ticker.get("last") or ticker.get("close")
+                    logger_instance.info(
+                        "[%s] %s price: %s",
+                        exch.exchange_name.upper(),
+                        sym,
+                        price,
+                    )
+                    
+                    record = {
+                        "timestamp": ticker.get("datetime") or datetime.now(timezone.utc).isoformat(),
+                        "exchange": exch.exchange_name,
+                        "symbol": sym,
+                        "price": price,
+                    }
+                    await asyncio.to_thread(
+                        saver_instance.save_csv,
+                        record,
+                        f"{exch.exchange_name}_ticker",
+                    )
+                except ccxt.NetworkError as exc:
+                    logger_instance.warning(
+                        "Network error fetching %s on %s: %s",
+                        sym,
+                        exch.exchange_name,
+                        exc,
+                    )
+                except ccxt.ExchangeError as exc:
+                    logger_instance.warning(
+                        "Exchange error fetching %s on %s: %s",
+                        sym,
+                        exch.exchange_name,
+                        exc,
+                    )
+                except Exception as exc:
+                    logger_instance.exception(
+                        "Unexpected error fetching data for %s on %s: %s",
+                        sym,
+                        exch.exchange_name,
+                        exc,
+                    )
+            
+            tasks.append(asyncio.create_task(fetch_single_ticker(exchange, symbol)))
+    
+    # Wait for all fetches to complete
+    await asyncio.gather(*tasks)
+    logger_instance.info("Completed one-time fetch for all symbols.")
+
+
+async def main(once: bool = False) -> None:
+    """
+    Run concurrent fetch loops for the configured exchanges.
+    
+    Args:
+        once: If True, fetch each symbol once and exit. If False, run continuously.
+    """
+    if once:
+        await fetch_once()
+        return
+    
     global logger_instance, saver_instance, exchanges_list, fetch_tasks
     
     logger_instance = initialize()
@@ -379,7 +468,18 @@ async def fetch_ticker(exchange_name: str, symbol: str):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="NexusFeed: Market Data Aggregator & Normalizer"
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Fetch ticker data once for all symbols and exit (useful for debugging)",
+    )
+    
+    args = parser.parse_args()
+    
     try:
-        asyncio.run(main())
+        asyncio.run(main(once=args.once))
     except KeyboardInterrupt:
         pass
