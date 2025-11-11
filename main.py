@@ -1,8 +1,9 @@
 """Main entry point for NexusFeed application."""
 
 import asyncio
+import importlib
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Sequence, Optional
 from urllib.parse import unquote
 
@@ -10,7 +11,6 @@ import ccxt
 from fastapi import FastAPI
 
 from config import Config
-from exchanges import BinanceExchange, DeribitExchange, OKXExchange, BybitExchange
 from helpers.logger import setup_logger
 from helpers.saver import DataSaver
 
@@ -29,13 +29,12 @@ def initialize() -> logging.Logger:
 
     logger = setup_logger(
         name="nexusfeed",
-        log_file=Config.LOG_FILE,
+        log_file=None,  # Do not write logs to any file
         level=getattr(logging, Config.LOG_LEVEL),
     )
 
     logger.info("NexusFeed application starting...")
     logger.info("Data directory: %s", Config.DATA_DIR)
-    logger.info("Logs directory: %s", Config.LOGS_DIR)
     logger.info("NexusFeed application initialized.")
     return logger
 
@@ -44,9 +43,12 @@ async def fetch_loop(
     exchange,
     saver: DataSaver,
     logger: logging.Logger,
-    interval: int = 5,
+    interval: int = None,
 ) -> None:
     """Continuously fetch ticker data for all symbols on an exchange."""
+    if interval is None:
+        interval = Config.REFRESH_INTERVAL
+    
     if not exchange.symbols:
         logger.warning("Exchange %s has no symbols configured.", exchange.exchange_name)
         return
@@ -64,7 +66,7 @@ async def fetch_loop(
                 )
 
                 record = {
-                    "timestamp": ticker.get("datetime") or datetime.utcnow().isoformat(),
+                    "timestamp": ticker.get("datetime") or datetime.now(timezone.utc).isoformat(),
                     "exchange": exchange.exchange_name,
                     "symbol": symbol,
                     "price": price,
@@ -122,29 +124,46 @@ def normalize_symbol(symbol: str) -> str:
 
 
 def get_exchanges() -> Sequence:
-    """Get configured exchanges."""
-    return [
-        BinanceExchange(
-            symbols=["BTC/USDT", "ETH/USDT"],
-            sandbox=Config.SANDBOX_MODE,
-            **Config.get_exchange_credentials("binance"),
-        ),
-        DeribitExchange(
-            symbols=["BTC/USDT", "ETH/USDT"],
-            sandbox=Config.SANDBOX_MODE,
-            **Config.get_exchange_credentials("deribit"),
-        ),
-        # OKXExchange(
-        #     symbols=["BTC/USDT", "ETH/USDT"],
-        #     sandbox=Config.SANDBOX_MODE,
-        #     **Config.get_exchange_credentials("okx"),
-        # ),
-        # BybitExchange(
-        #     symbols=["BTC/USDT", "ETH/USDT"],
-        #     sandbox=Config.SANDBOX_MODE,
-        #     **Config.get_exchange_credentials("bybit"),
-        # ),
-    ]
+    """
+    Dynamically load and instantiate exchanges from Config.EXCHANGES.
+    
+    Returns:
+        List of exchange instances
+    """
+    global logger_instance
+    exchanges = []
+    
+    # Use logger if available, otherwise use print for errors
+    log_warning = logger_instance.warning if logger_instance else print
+    log_exception = logger_instance.exception if logger_instance else print
+    
+    for exchange_name, symbols in Config.EXCHANGES.items():
+        try:
+            # Get the class name
+            class_name = f"{exchange_name.capitalize()}Exchange"
+            
+            # Dynamically import the exchange module
+            module = importlib.import_module(f"exchanges.{exchange_name}")
+            
+            # Get the exchange class
+            exchange_class = getattr(module, class_name)
+            
+            # Instantiate the exchange
+            exchange = exchange_class(
+                symbols=symbols,
+                sandbox=Config.SANDBOX_MODE,
+                **Config.get_exchange_credentials(exchange_name),
+            )
+            
+            exchanges.append(exchange)
+        except ImportError as e:
+            log_warning(f"Failed to import exchange '{exchange_name}': {e}")
+        except AttributeError as e:
+            log_warning(f"Exchange class '{class_name}' not found for '{exchange_name}': {e}")
+        except Exception as e:
+            log_exception(f"Failed to initialize exchange '{exchange_name}': {e}")
+    
+    return exchanges
 
 
 async def main() -> None:
@@ -153,6 +172,12 @@ async def main() -> None:
     
     logger_instance = initialize()
     saver_instance = DataSaver(base_path=str(Config.RAW_DATA_DIR))
+    
+    # Clear existing data before starting new session
+    deleted_count = saver_instance.clear_data()
+    if deleted_count > 0:
+        logger_instance.info("Cleared %d existing data files from previous session.", deleted_count)
+    
     exchanges_list = get_exchanges()
 
     fetch_tasks = [
@@ -175,6 +200,10 @@ async def startup_event():
         logger_instance = initialize()
     if not saver_instance:
         saver_instance = DataSaver(base_path=str(Config.RAW_DATA_DIR))
+        # Clear existing data before starting new session
+        deleted_count = saver_instance.clear_data()
+        if deleted_count > 0 and logger_instance:
+            logger_instance.info("Cleared %d existing data files from previous session.", deleted_count)
     if not exchanges_list:
         exchanges_list = get_exchanges()
 
@@ -308,7 +337,7 @@ async def fetch_ticker(exchange_name: str, symbol: str):
         # Save the data if saver is available
         if saver_instance:
             record = {
-                "timestamp": ticker.get("datetime") or datetime.utcnow().isoformat(),
+                "timestamp": ticker.get("datetime") or datetime.now(timezone.utc).isoformat(),
                 "exchange": exchange.exchange_name,
                 "symbol": symbol,
                 "price": price,
@@ -324,7 +353,7 @@ async def fetch_ticker(exchange_name: str, symbol: str):
             "symbol": symbol,
             "price": price,
             "ticker": ticker,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except ccxt.NetworkError as exc:
         return {

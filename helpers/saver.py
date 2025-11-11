@@ -20,6 +20,32 @@ class DataSaver:
         self.base_path = Path(base_path)
         self.base_path.mkdir(parents=True, exist_ok=True)
 
+    def clear_data(self) -> int:
+        """
+        Clear all existing data files (CSV and JSON) in the base path directory.
+        Only deletes files with .csv and .json extensions to avoid deleting other files.
+        
+        Returns:
+            Number of files deleted
+        """
+        if not self.base_path.exists():
+            return 0
+        
+        deleted_count = 0
+        # Only clear CSV and JSON files (the files we create)
+        allowed_extensions = {'.csv', '.json'}
+        
+        for file_path in self.base_path.iterdir():
+            if file_path.is_file() and file_path.suffix.lower() in allowed_extensions:
+                try:
+                    file_path.unlink()
+                    deleted_count += 1
+                except Exception as e:
+                    # Log error but continue deleting other files
+                    print(f"Error deleting {file_path}: {e}")
+        
+        return deleted_count
+
     def save_json(self, data: Any, filename: str) -> str:
         """
         Append JSON object to JSON file.

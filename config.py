@@ -12,7 +12,6 @@ class Config:
     BASE_DIR = Path(__file__).parent
     DATA_DIR = BASE_DIR / "data"
     RAW_DATA_DIR = DATA_DIR / "raw"
-    LOGS_DIR = DATA_DIR / "logs"
     
     # Generic exchange API credentials loader (from environment variables)
     @staticmethod
@@ -39,15 +38,25 @@ class Config:
     
     # Logging configuration
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    LOG_FILE: Optional[str] = str(LOGS_DIR / "nexusfeed.log")
+
     
     # Application settings
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     SANDBOX_MODE: bool = os.getenv("SANDBOX_MODE", "False").lower() == "true"
     
+    # Refresh interval for fetching ticker data (in seconds)
+    REFRESH_INTERVAL: int = int(os.getenv("REFRESH_INTERVAL", "5"))
+    
+    # Exchange configuration: exchange name -> list of symbols
+    EXCHANGES: dict = {
+        "binance": ["BTC/USDT", "ETH/USDT"],
+        "deribit": ["BTC/USDT", "ETH/USDT"],
+        # "okx": ["BTC/USDT", "ETH/USDT"],
+        "bybit": ["BTC/USDT", "ETH/USDT"],
+    }
+    
     @classmethod
     def ensure_directories(cls):
         """Ensure all required directories exist."""
         cls.RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        cls.LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
