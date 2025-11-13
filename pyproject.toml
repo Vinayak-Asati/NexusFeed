@@ -4,23 +4,36 @@ version = "0.1.0"
 description = "NexusFeed: Market Data Aggregator & Normalizer"
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
-packages = [{ include = "api" }, { include = "helpers" }, { include = "exchanges" }]
+packages = [
+    { include = "api" },
+    { include = "helpers" },
+    { include = "exchanges" },
+    { include = "nexusfeed", from = "src" }
+]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
-fastapi = "^0.115.0"
-uvicorn = {extras = ["standard"], version = "^0.30.0"}
-ccxt = ">=4.4.89"
+fastapi = "^0.115.12"
+uvicorn = {extras = ["standard"], version = "^0.34.0"}
+sqlmodel = "^0.0.18"
+asyncpg = "^0.30.0"
+aioredis = "^2.0.1"
+ccxt = "^4.4.89"
+aiofiles = "^24.1.0"
+httpx = "^0.27.2"
+prometheus-client = "^0.20.0"
+pydantic = "^2.9.0"
+alembic = "^1.13.2"
+python-dotenv = "^1.0.0"
 ccxtpro = ">=1.0.1"
 aiohttp = ">=3.10.0"
 websockets = ">=11.0.0"
 pandas = ">=2.2.3"
 sqlalchemy = ">=2.0.0"
 redis = ">=5.0.0"
-pydantic = ">=2.0.0"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
+pytest = "^8.2.1"
 black = "^24.0.0"
 flake8 = "^7.0.0"
 
