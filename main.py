@@ -10,10 +10,21 @@ from urllib.parse import unquote
 
 import ccxt
 from fastapi import FastAPI
+import sys
+from pathlib import Path
+
+# Ensure src/ is on sys.path for local development
+BASE_DIR = Path(__file__).resolve().parent
+SRC_DIR = BASE_DIR / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from config import Config
 from helpers.logger import setup_logger
 from helpers.saver import DataSaver, normalize_ticker
+from nexusfeed.services.feed_manager import FeedManager
+from nexusfeed.storage.repo import Repo
+from nexusfeed.services.simulated_connector import SimulatedConnector
 
 app = FastAPI(title="NexusFeed API", version="0.1.0")
 
@@ -22,6 +33,8 @@ exchanges_list: list = []
 fetch_tasks: list = []
 logger_instance: logging.Logger = None
 saver_instance: DataSaver = None
+feed_manager_instance: FeedManager = None
+repo_instance: Repo = None
 
 
 def initialize() -> logging.Logger:
@@ -290,7 +303,7 @@ async def main(once: bool = False) -> None:
 @app.on_event("startup")
 async def startup_event():
     """Initialize exchanges when FastAPI app starts."""
-    global logger_instance, saver_instance, exchanges_list
+    global logger_instance, saver_instance, exchanges_list, repo_instance, feed_manager_instance
     if not logger_instance:
         logger_instance = initialize()
     if not saver_instance:
@@ -301,6 +314,22 @@ async def startup_event():
             logger_instance.info("Cleared %d existing data files from previous session.", deleted_count)
     if not exchanges_list:
         exchanges_list = get_exchanges()
+    if not repo_instance:
+        repo_instance = Repo()
+    if not feed_manager_instance:
+        feed_manager_instance = FeedManager(repo_instance)
+        for exch in exchanges_list:
+            feed_manager_instance.register(exch)
+        # Register a simulated connector for quick validation
+        feed_manager_instance.register(SimulatedConnector(exchange_name="sim", symbols=["BTC/USDT"]))
+        asyncio.create_task(feed_manager_instance.start_all())
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global feed_manager_instance
+    if feed_manager_instance:
+        await feed_manager_instance.stop_all()
 
 
 @app.get("/health")
