@@ -2,6 +2,8 @@
 
 import logging
 import sys
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -30,11 +32,21 @@ def setup_logger(
     # Remove existing handlers to avoid duplicates
     logger.handlers.clear()
     
-    # Default format
-    if format_string is None:
-        format_string = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    
-    formatter = logging.Formatter(format_string)
+    class JsonFormatter(logging.Formatter):
+        def format(self, record: logging.LogRecord) -> str:
+            payload = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "component": record.name,
+                "level": record.levelname.lower(),
+                "message": record.getMessage(),
+            }
+            # include extra fields if provided
+            for key in ("event", "symbol", "sequence"):
+                if hasattr(record, key):
+                    payload[key] = getattr(record, key)
+            return json.dumps(payload)
+
+    formatter = JsonFormatter()
     
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)

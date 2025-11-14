@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from .db import async_engine
 from .models import Trade, OrderbookSnapshot
+from nexusfeed.utils.metrics import trades_ingested_total, db_write_latency_seconds
 
 
 def _to_dt(value):
@@ -105,8 +106,13 @@ class Repo:
         to_flush = list(self._batch)
         self._batch.clear()
         async with AsyncSession(self.engine) as session:
-            for t in to_flush:
-                session.add(t)
-            await session.commit()
+            with db_write_latency_seconds.labels(operation="trade_flush").time():
+                for t in to_flush:
+                    session.add(t)
+                await session.commit()
+            try:
+                trades_ingested_total.inc(len(to_flush))
+            except Exception:
+                pass
 
 __all__ = ["Repo"]

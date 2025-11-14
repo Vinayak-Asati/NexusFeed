@@ -25,6 +25,22 @@ from helpers.saver import DataSaver, normalize_ticker
 from nexusfeed.services.feed_manager import FeedManager
 from nexusfeed.storage.repo import Repo
 from nexusfeed.services.simulated_connector import SimulatedConnector
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+from nexusfeed.storage.models import OrderbookSnapshot
+from nexusfeed.storage.redis_cache import get_snapshot as redis_get_snapshot
+from nexusfeed.publisher.websocket_pub import WebSocketPublisher
+from fastapi import WebSocket
+from nexusfeed.services.replay_service import (
+    create_session,
+    get_session,
+    remove_session,
+    stream_replay,
+)
+from nexusfeed.connectors.binance import BinanceOrderBookConnector
+import time
+from fastapi import Response
+from nexusfeed.utils.metrics import latest_metrics, metrics_content_type
 
 app = FastAPI(title="NexusFeed API", version="0.1.0")
 
@@ -35,6 +51,8 @@ logger_instance: logging.Logger = None
 saver_instance: DataSaver = None
 feed_manager_instance: FeedManager = None
 repo_instance: Repo = None
+publisher_instance: WebSocketPublisher = None
+binance_obc: BinanceOrderBookConnector = None
 
 
 def initialize() -> logging.Logger:
@@ -303,7 +321,7 @@ async def main(once: bool = False) -> None:
 @app.on_event("startup")
 async def startup_event():
     """Initialize exchanges when FastAPI app starts."""
-    global logger_instance, saver_instance, exchanges_list, repo_instance, feed_manager_instance
+    global logger_instance, saver_instance, exchanges_list, repo_instance, feed_manager_instance, publisher_instance, binance_obc
     if not logger_instance:
         logger_instance = initialize()
     if not saver_instance:
@@ -316,13 +334,27 @@ async def startup_event():
         exchanges_list = get_exchanges()
     if not repo_instance:
         repo_instance = Repo()
+    if not publisher_instance:
+        publisher_instance = WebSocketPublisher()
+        await publisher_instance.start()
     if not feed_manager_instance:
-        feed_manager_instance = FeedManager(repo_instance)
+        feed_manager_instance = FeedManager(repo_instance, publisher=publisher_instance)
         for exch in exchanges_list:
             feed_manager_instance.register(exch)
         # Register a simulated connector for quick validation
         feed_manager_instance.register(SimulatedConnector(exchange_name="sim", symbols=["BTC/USDT"]))
         asyncio.create_task(feed_manager_instance.start_all())
+    # Initialize Binance order book connector using ccxt snapshot fetcher
+    if not binance_obc:
+        bin_ex = next((e for e in exchanges_list if getattr(e, "exchange_name", "").lower() == "binance"), None)
+        def snapshot_fetcher(symbol: str):
+            ob = bin_ex.get_orderbook(symbol, limit=50) if bin_ex else {"bids": [], "asks": []}
+            return {
+                "lastUpdateId": int(time.time() * 1000),
+                "bids": ob.get("bids", []),
+                "asks": ob.get("asks", []),
+            }
+        binance_obc = BinanceOrderBookConnector(snapshot_fetcher=snapshot_fetcher)
 
 
 @app.on_event("shutdown")
@@ -330,6 +362,8 @@ async def shutdown_event():
     global feed_manager_instance
     if feed_manager_instance:
         await feed_manager_instance.stop_all()
+    if publisher_instance:
+        await publisher_instance.stop()
 
 
 @app.get("/health")
@@ -505,6 +539,28 @@ async def fetch_ticker(exchange_name: str, symbol: str):
         }
 
 
+@app.get("/api/v1/book")
+async def get_book(instrument: str):
+    snap = await redis_get_snapshot(instrument)
+    if snap:
+        return snap
+    async with AsyncSession(repo_instance.engine) as session:
+        res = await session.exec(
+            select(OrderbookSnapshot).where(OrderbookSnapshot.instrument == instrument)
+        )
+        obj = res.first()
+        if obj:
+            return {
+                "source": obj.source,
+                "instrument": obj.instrument,
+                "sequence": obj.sequence,
+                "bids": obj.bids,
+                "asks": obj.asks,
+                "timestamp": obj.ts.isoformat(),
+            }
+    return {"error": "snapshot_not_found", "instrument": instrument}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="NexusFeed: Market Data Aggregator & Normalizer"
@@ -521,3 +577,90 @@ if __name__ == "__main__":
         asyncio.run(main(once=args.once))
     except KeyboardInterrupt:
         pass
+@app.websocket("/ws/feeds")
+async def ws_feeds(ws: WebSocket):
+    await ws.accept()
+    await publisher_instance.register(ws)
+    try:
+        while True:
+            msg = await ws.receive_json()
+            act = msg.get("action")
+            instr = msg.get("instrument")
+            if act == "subscribe" and instr:
+                await publisher_instance.subscribe(ws, instr)
+            elif act == "unsubscribe" and instr:
+                await publisher_instance.unsubscribe(ws, instr)
+    except Exception:
+        pass
+    finally:
+        await publisher_instance.unregister(ws)
+
+
+@app.post("/api/v1/binance/depth")
+async def post_binance_depth(payload: dict):
+    symbol = payload.get("instrument") or payload.get("symbol")
+    delta = {
+        "U": payload.get("U"),
+        "u": payload.get("u"),
+        "b": payload.get("b", []),
+        "a": payload.get("a", []),
+    }
+    applied = binance_obc.process_depth_delta(symbol, delta)
+    book = binance_obc.get_book(symbol)
+    # persist and publish
+    await feed_manager_instance.ingest_book({
+        "symbol": symbol,
+        "nonce": book.get("sequence"),
+        "bids": book.get("bids"),
+        "asks": book.get("asks"),
+        "timestamp": int(time.time() * 1000),
+    }, source="binance")
+    return {"applied": applied, "sequence": book.get("sequence")}
+
+
+@app.get("/api/v1/binance/book")
+async def get_binance_book(instrument: str):
+    return binance_obc.get_book(instrument)
+
+
+@app.post("/api/v1/replay")
+async def start_replay(payload: dict):
+    instrument = payload.get("instrument")
+    from_ts = payload.get("from_ts")
+    to_ts = payload.get("to_ts")
+    speed = float(payload.get("speed", 1.0))
+    sid = create_session(instrument, from_ts, to_ts, speed)
+    return {"session_id": sid, "ws_url": f"/ws/replay/{sid}"}
+
+
+@app.websocket("/ws/replay/{sid}")
+async def ws_replay(ws: WebSocket, sid: str):
+    await ws.accept()
+    sess = get_session(sid)
+    if not sess:
+        await ws.send_json({"error": "invalid_session"})
+        await ws.close()
+        return
+    try:
+        async with AsyncSession(repo_instance.engine) as dbs:
+            await stream_replay(
+                dbs,
+                ws,
+                sess["instrument"],
+                sess["from_ts"],
+                sess["to_ts"],
+                sess["speed"],
+            )
+    except Exception as e:
+        try:
+            await ws.send_json({"error": str(e)})
+        except Exception:
+            pass
+    finally:
+        remove_session(sid)
+
+
+@app.get("/metrics")
+async def metrics():
+    data = latest_metrics()
+    return Response(content=data, media_type=metrics_content_type())
