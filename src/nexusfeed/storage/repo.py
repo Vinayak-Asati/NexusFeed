@@ -5,7 +5,7 @@ from typing import List, Optional
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from .db import async_engine
+from .db import get_engine
 from .models import Trade, OrderbookSnapshot
 from nexusfeed.utils.metrics import trades_ingested_total, db_write_latency_seconds
 
@@ -26,8 +26,8 @@ def _to_dt(value):
 
 
 class Repo:
-    def __init__(self, engine=async_engine, batch_size: int = 100, flush_interval: float = 1.0):
-        self.engine = engine
+    def __init__(self, engine=None, batch_size: int = 100, flush_interval: float = 1.0):
+        self.engine = engine or get_engine()
         self.batch_size = batch_size
         self.flush_interval = flush_interval
         self._batch: List[Trade] = []
