@@ -5,7 +5,7 @@ from typing import Optional, Sequence
 from .base_exchange import BaseExchange
 
 
-class BinanceExchange(BaseExchange):
+class Binance(BaseExchange):
     """Binance exchange connector."""
 
     def __init__(

@@ -5,7 +5,7 @@ from typing import Optional, Sequence
 from .base_exchange import BaseExchange
 
 
-class OkxExchange(BaseExchange):
+class Okx(BaseExchange):
     """OKX exchange connector."""
 
     def __init__(

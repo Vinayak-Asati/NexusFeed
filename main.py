@@ -12,6 +12,7 @@ import ccxt
 from fastapi import FastAPI
 import sys
 from pathlib import Path
+import random
 
 # Ensure src/ is on sys.path for local development
 BASE_DIR = Path(__file__).resolve().parent
@@ -19,12 +20,12 @@ SRC_DIR = BASE_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from config import Config
+from config import Config, EXCHANGES, ENABLED_EXCHANGES, REFRESH_INTERVAL
 from helpers.logger import setup_logger
 from helpers.saver import DataSaver, normalize_ticker
 from nexusfeed.services.feed_manager import FeedManager
 from nexusfeed.storage.repo import Repo
-from nexusfeed.services.simulated_connector import SimulatedConnector
+from exchanges.loader import get_exchange
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from nexusfeed.storage.models import OrderbookSnapshot
@@ -79,61 +80,218 @@ async def fetch_loop(
 ) -> None:
     """Continuously fetch ticker data for all symbols on an exchange."""
     if interval is None:
-        interval = Config.REFRESH_INTERVAL
+        interval = REFRESH_INTERVAL
     
     if not exchange.symbols:
         logger.warning("Exchange %s has no symbols configured.", exchange.exchange_name)
         return
 
+    failure_counts = {}
+    backoffs = {}
+    async def _apply_backoff(key: tuple, base_rand: bool = False) -> float:
+        prev = backoffs.get(key, 0.0)
+        base = random.uniform(3.0, 10.0) if base_rand else 3.0
+        nxt = base if prev == 0 else min(prev * 2, 60.0)
+        backoffs[key] = nxt
+        return nxt
+    async def _reset(key: tuple):
+        if failure_counts.get(key):
+            failure_counts[key] = 0
+            backoffs[key] = 0.0
+    async def _inc_fail(key: tuple) -> int:
+        cnt = failure_counts.get(key, 0) + 1
+        failure_counts[key] = cnt
+        return cnt
+    async def _fetch_ticker(symbol: str):
+        key = ("ticker", symbol)
+        try:
+            ticker = await asyncio.to_thread(exchange.get_ticker, symbol)
+            price = ticker.get("last") or ticker.get("close")
+            logger.info(
+                "[%s] %s price: %s",
+                exchange.exchange_name.upper(),
+                symbol,
+                price,
+            )
+            ticker_data = dict(ticker)
+            ticker_data["symbol"] = symbol
+            if "timestamp" not in ticker_data and "datetime" not in ticker_data:
+                ticker_data["timestamp"] = datetime.now(timezone.utc).isoformat()
+            normalized_data = normalize_ticker(ticker_data, exchange.exchange_name)
+            await asyncio.to_thread(
+                saver.save_csv,
+                normalized_data,
+                f"{exchange.exchange_name}_ticker",
+            )
+            await _reset(key)
+        except (ccxt.RateLimitExceeded, ccxt.DDoSProtection, ccxt.ExchangeNotAvailable) as exc:
+            cnt = await _inc_fail(key)
+            msg = "%s fetching %s on %s: %s" % (
+                exc.__class__.__name__,
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key, base_rand=True))
+        except ccxt.NetworkError as exc:
+            cnt = await _inc_fail(key)
+            msg = "NetworkError fetching %s on %s: %s" % (
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key))
+        except ccxt.ExchangeError as exc:
+            cnt = await _inc_fail(key)
+            msg = "ExchangeError fetching %s on %s: %s" % (
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key))
+        except Exception as exc:
+            cnt = await _inc_fail(key)
+            msg = "Unexpected error fetching %s on %s: %s" % (
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key))
+    async def _fetch_book(symbol: str):
+        key = ("book", symbol)
+        try:
+            _ = await asyncio.to_thread(exchange.get_orderbook, symbol)
+            await _reset(key)
+        except (ccxt.RateLimitExceeded, ccxt.DDoSProtection, ccxt.ExchangeNotAvailable) as exc:
+            cnt = await _inc_fail(key)
+            msg = "%s fetching book %s on %s: %s" % (
+                exc.__class__.__name__,
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key, base_rand=True))
+        except ccxt.NetworkError as exc:
+            cnt = await _inc_fail(key)
+            msg = "NetworkError fetching book %s on %s: %s" % (
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key))
+        except ccxt.ExchangeError as exc:
+            cnt = await _inc_fail(key)
+            msg = "ExchangeError fetching book %s on %s: %s" % (
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key))
+        except Exception as exc:
+            cnt = await _inc_fail(key)
+            msg = "Unexpected error fetching book %s on %s: %s" % (
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key))
+    async def _fetch_trades(symbol: str):
+        key = ("trades", symbol)
+        try:
+            _ = await asyncio.to_thread(exchange.get_trades, symbol)
+            await _reset(key)
+        except (ccxt.RateLimitExceeded, ccxt.DDoSProtection, ccxt.ExchangeNotAvailable) as exc:
+            cnt = await _inc_fail(key)
+            msg = "%s fetching trades %s on %s: %s" % (
+                exc.__class__.__name__,
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key, base_rand=True))
+        except ccxt.NetworkError as exc:
+            cnt = await _inc_fail(key)
+            msg = "NetworkError fetching trades %s on %s: %s" % (
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key))
+        except ccxt.ExchangeError as exc:
+            cnt = await _inc_fail(key)
+            msg = "ExchangeError fetching trades %s on %s: %s" % (
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key))
+        except Exception as exc:
+            cnt = await _inc_fail(key)
+            msg = "Unexpected error fetching trades %s on %s: %s" % (
+                symbol,
+                exchange.exchange_name,
+                str(exc),
+            )
+            if cnt == 1:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+            await asyncio.sleep(await _apply_backoff(key))
     while True:
+        tasks = []
         for symbol in exchange.symbols:
+            tasks.append(asyncio.create_task(_fetch_ticker(symbol)))
+            tasks.append(asyncio.create_task(_fetch_book(symbol)))
+            tasks.append(asyncio.create_task(_fetch_trades(symbol)))
+        if tasks:
             try:
-                ticker = await asyncio.to_thread(exchange.get_ticker, symbol)
-                price = ticker.get("last") or ticker.get("close")
-                logger.info(
-                    "[%s] %s price: %s",
-                    exchange.exchange_name.upper(),
-                    symbol,
-                    price,
-                )
-
-                # Prepare ticker data with symbol and timestamp
-                ticker_data = dict(ticker)
-                ticker_data["symbol"] = symbol
-                if "timestamp" not in ticker_data and "datetime" not in ticker_data:
-                    ticker_data["timestamp"] = datetime.now(timezone.utc).isoformat()
-                
-                # Normalize ticker data before saving
-                normalized_data = normalize_ticker(ticker_data, exchange.exchange_name)
-                
-                await asyncio.to_thread(
-                    saver.save_csv,
-                    normalized_data,
-                    f"{exchange.exchange_name}_ticker",
-                )
-            except ccxt.NetworkError as exc:
-                logger.warning(
-                    "Network error fetching %s on %s: %s. Retrying in 1 second...",
-                    symbol,
-                    exchange.exchange_name,
-                    exc,
-                )
-                await asyncio.sleep(1)
-            except ccxt.ExchangeError as exc:
-                logger.warning(
-                    "Exchange error fetching %s on %s: %s. Retrying in 1 second...",
-                    symbol,
-                    exchange.exchange_name,
-                    exc,
-                )
-                await asyncio.sleep(1)
-            except Exception as exc:
-                logger.exception(
-                    "Unexpected error fetching data for %s on %s: %s",
-                    symbol,
-                    exchange.exchange_name,
-                    exc,
-                )
+                await asyncio.gather(*tasks)
+            except Exception:
+                pass
         await asyncio.sleep(interval)
 
 
@@ -159,45 +317,29 @@ def normalize_symbol(symbol: str) -> str:
 
 
 def get_exchanges() -> Sequence:
-    """
-    Dynamically load and instantiate exchanges from Config.EXCHANGES.
-    
-    Returns:
-        List of exchange instances
-    """
     global logger_instance
     exchanges = []
-    
-    # Use logger if available, otherwise use print for errors
     log_warning = logger_instance.warning if logger_instance else print
     log_exception = logger_instance.exception if logger_instance else print
-    
-    for exchange_name, symbols in Config.EXCHANGES.items():
+    enabled = list(ENABLED_EXCHANGES) if ENABLED_EXCHANGES else []
+    for exchange_name in enabled:
         try:
-            # Get the class name
-            class_name = f"{exchange_name.capitalize()}Exchange"
-            
-            # Dynamically import the exchange module
-            module = importlib.import_module(f"exchanges.{exchange_name}")
-            
-            # Get the exchange class
-            exchange_class = getattr(module, class_name)
-            
-            # Instantiate the exchange
-            exchange = exchange_class(
-                symbols=symbols,
+            ex = get_exchange(
+                exchange_name,
+                [],
                 sandbox=Config.SANDBOX_MODE,
                 **Config.get_exchange_credentials(exchange_name),
             )
-            
-            exchanges.append(exchange)
-        except ImportError as e:
-            log_warning(f"Failed to import exchange '{exchange_name}': {e}")
-        except AttributeError as e:
-            log_warning(f"Exchange class '{class_name}' not found for '{exchange_name}': {e}")
+            markets = ex.get_markets()
+            all_symbols = [s for s in markets.keys() if "/" in s]
+            if not all_symbols:
+                continue
+            k = min(3, len(all_symbols))
+            selected = random.sample(all_symbols, k)
+            ex.symbols = selected
+            exchanges.append(ex)
         except Exception as e:
             log_exception(f"Failed to initialize exchange '{exchange_name}': {e}")
-    
     return exchanges
 
 
@@ -341,8 +483,6 @@ async def startup_event():
         feed_manager_instance = FeedManager(repo_instance, publisher=publisher_instance)
         for exch in exchanges_list:
             feed_manager_instance.register(exch)
-        # Register a simulated connector for quick validation
-        feed_manager_instance.register(SimulatedConnector(exchange_name="sim", symbols=["BTC/USDT"]))
         asyncio.create_task(feed_manager_instance.start_all())
     # Initialize Binance order book connector using ccxt snapshot fetcher
     if not binance_obc:

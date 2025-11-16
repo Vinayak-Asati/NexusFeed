@@ -5,7 +5,7 @@ from typing import Optional, Sequence
 from .base_exchange import BaseExchange
 
 
-class DeribitExchange(BaseExchange):
+class Deribit(BaseExchange):
     """Deribit exchange connector."""
 
     def __init__(

@@ -48,15 +48,40 @@ class Config:
     REFRESH_INTERVAL: int = int(os.getenv("REFRESH_INTERVAL", "5"))
     
     # Exchange configuration: exchange name -> list of symbols
+    ENABLED_EXCHANGES: list = [
+        "binance_spot",
+        "bybit",
+        "deribit",
+    ]
+
     EXCHANGES: dict = {
-        "binance": ["BTC/USDT", "ETH/USDT"],
-        "deribit": ["BTC/USDT", "ETH/USDT"],
-        # "okx": ["BTC/USDT", "ETH/USDT"],
+        "binance_spot": ["BTC/USDT", "ETH/USDT"],
+        "binance_usdm": ["BTC/USDT", "ETH/USDT"],
+        "binance_coinm": ["BTC/USD", "ETH/USD"],
+        "bitfinex": ["BTC/USD", "ETH/USD"],
+        "bitget": ["BTC/USDT", "ETH/USDT"],
+        "bitmex": ["BTC/USD", "ETH/USD"],
+        "bitso": ["BTC/USD", "ETH/USD"],
+        "bitstamp": ["BTC/USD", "ETH/USD"],
+        "blofin": ["BTC/USDT", "ETH/USDT"],
         "bybit": ["BTC/USDT", "ETH/USDT"],
+        "cryptocom": ["BTC/USDT", "ETH/USDT"],
+        "deribit": ["BTC/USD", "ETH/USD"],
+        "gateio": ["BTC/USDT", "ETH/USDT"],
+        "gemini": ["BTC/USD", "ETH/USD"],
+        "kraken_spot": ["BTC/USD", "ETH/USD"],
+        "kraken_futures": ["BTC/USD", "ETH/USD"],
+        "kucoin_spot": ["BTC/USDT", "ETH/USDT"],
+        "kucoin_futures": ["BTC/USDT", "ETH/USDT"],
+        "okx": ["BTC/USDT", "ETH/USDT"],
     }
     
     @classmethod
     def ensure_directories(cls):
         """Ensure all required directories exist."""
         cls.RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+EXCHANGES = Config.EXCHANGES
+ENABLED_EXCHANGES = Config.ENABLED_EXCHANGES
+REFRESH_INTERVAL = Config.REFRESH_INTERVAL
 

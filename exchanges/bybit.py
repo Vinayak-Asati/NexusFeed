@@ -5,7 +5,7 @@ from typing import Optional, Sequence
 from .base_exchange import BaseExchange
 
 
-class BybitExchange(BaseExchange):
+class Bybit(BaseExchange):
     """Bybit exchange connector."""
 
     def __init__(

@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from datetime import datetime
 from typing import Any, Dict
 
 import pandas as pd
@@ -102,6 +103,10 @@ class DataSaver:
 
         return str(filepath)
 
+    @staticmethod
+    def sanitize_symbol(symbol: str) -> str:
+        return str(symbol).replace("/", "-")
+
     def save_csv(self, data: Dict[str, Any], filename: str) -> str:
         """
         Append a dictionary to a CSV file, creating headers if the file doesn't exist.
@@ -113,7 +118,12 @@ class DataSaver:
         Returns:
             Path to saved file.
         """
-        filepath = self.base_path / f"{filename}.csv"
+        exchange = str(data.get("source") or data.get("exchange") or "unknown").lower()
+        symbol = self.sanitize_symbol(str(data.get("symbol") or "unknown"))
+        date_part = datetime.utcnow().strftime("%Y%m%d")
+        dir_path = self.base_path / exchange / symbol
+        dir_path.mkdir(parents=True, exist_ok=True)
+        filepath = dir_path / f"ticker_{date_part}.csv"
         df = pd.DataFrame([data])
         file_exists = filepath.exists()
         df.to_csv(filepath, mode='a', header=not file_exists, index=False)
