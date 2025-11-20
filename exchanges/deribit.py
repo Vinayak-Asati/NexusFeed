@@ -1,0 +1,26 @@
+"""Deribit exchange connector."""
+
+from typing import Optional, Sequence
+
+from .base_exchange import BaseExchange
+
+
+class Deribit(BaseExchange):
+    """Deribit exchange connector."""
+
+    def __init__(
+        self,
+        symbols: Sequence[str],
+        api_key: Optional[str] = None,
+        api_secret: Optional[str] = None,
+        sandbox: bool = False,
+    ):
+        """Initialize Deribit exchange connector."""
+        super().__init__(
+            "deribit",
+            symbols=symbols,
+            api_key=api_key,
+            api_secret=api_secret,
+            sandbox=sandbox,
+        )
+

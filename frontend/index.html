@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NexusFeed - Professional Trading Platform</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body data-theme="dark">
+    <nav class="navbar">
+        <div class="navbar-brand">NexusFeed</div>
+        <button class="theme-toggle" onclick="toggleTheme()">
+            <span id="theme-icon">🌙</span>
+            <span id="theme-text">Dark</span>
+        </button>
+    </nav>
+    
+    <div class="container">
+        <div class="section">
+            <h2 class="section-title">Select Exchange</h2>
+            <div class="search-wrapper">
+                <label class="search-label" for="exchange-search">🔍 Search Exchange</label>
+                <input 
+                    type="text" 
+                    id="exchange-search" 
+                    class="search-box" 
+                    placeholder="Type to search exchanges (e.g., binance, bybit, okx)..."
+                    oninput="filterExchanges()"
+                    onfocus="showExchangeDropdown()"
+                />
+                <div id="exchange-dropdown" class="exchange-dropdown-results" style="display: none;"></div>
+            </div>
+        </div>
+        
+        <div class="section" id="symbols-section" style="display: none;">
+            <h2 class="section-title">Market Symbols</h2>
+            
+            <div class="controls-row">
+                <div class="select-wrapper">
+                    <select id="instrument-type" onchange="loadSymbols()">
+                        <option value="spot">Loading...</option>
+                    </select>
+                </div>
+                <button class="btn btn-secondary" onclick="loadAllTypes()">
+                    <span>📊</span>
+                    All Types
+                </button>
+            </div>
+            
+            <div id="stats" class="stats-grid" style="display: none;">
+                <div class="stat-card">
+                    <div class="stat-label">Total Symbols</div>
+                    <div class="stat-value" id="total-symbols">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Instrument Type</div>
+                    <div class="stat-value" id="instrument-type-display" style="font-size: 1.25rem;">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Filtered</div>
+                    <div class="stat-value" id="filtered-symbols">0</div>
+                </div>
+            </div>
+            
+            <div class="search-wrapper">
+                <label class="search-label" for="symbol-search">🔍 Search Symbols</label>
+                <input 
+                    type="text" 
+                    id="symbol-search" 
+                    class="search-box" 
+                    placeholder="Type to search (e.g., BTC, ETH, USDT)..."
+                    oninput="filterSymbols()"
+                />
+            </div>
+            
+            <div id="error-container"></div>
+            <div id="symbols-container" class="symbols-container"></div>
+        </div>
+    </div>
+    
+    <!-- Market Data Modal -->
+    <div id="market-data-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeMarketDataModal()">&times;</span>
+            <h2 id="modal-title" style="margin-bottom: 1.5rem; color: var(--accent-primary);">Market Data</h2>
+            <div id="market-data-content">
+                <div class="loading-spinner"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
+
