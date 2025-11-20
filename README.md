@@ -1,4 +1,5 @@
 # NexusFeed: Market Data Aggregator & Normalizer
+[Live Demo](https://nexusfeed.onrender.com)
 
 ## Overview
 
