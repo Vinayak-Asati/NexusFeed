@@ -52,6 +52,22 @@ class Config:
         "binance_spot",
         "bybit",
         "deribit",
+        # "kraken_spot",
+        "kraken_futures",
+        # "kucoin_spot",
+        # "kucoin_futures",
+        # "okx",
+        "gateio",
+        "gemini",
+        # "cryptocom",
+        "blofin",
+        # "bitfinex",
+        "bitget",
+        # "bitmex",
+        "bitso",
+        # "bitstamp",
+        "binance_usdm",
+        "binance_coinm",
     ]
 
     EXCHANGES: dict = {

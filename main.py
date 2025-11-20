@@ -9,7 +9,8 @@ from typing import Sequence, Optional
 from urllib.parse import unquote
 
 import ccxt
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
+from fastapi.staticfiles import StaticFiles
 import sys
 from pathlib import Path
 import random
@@ -23,6 +24,12 @@ if str(SRC_DIR) not in sys.path:
 from config import Config, EXCHANGES, ENABLED_EXCHANGES, REFRESH_INTERVAL
 from helpers.logger import setup_logger
 from helpers.saver import DataSaver, normalize_ticker
+from helpers.gomarket_api import (
+    get_symbols_for_exchange,
+    get_all_instrument_types_for_exchange,
+    API_EXCHANGE_INSTRUMENT_MAP,
+    GOMARKET_API_SYMBOL_ROUTES,
+)
 from nexusfeed.services.feed_manager import FeedManager
 from nexusfeed.storage.repo import Repo
 from exchanges.loader import get_exchange
@@ -44,6 +51,11 @@ from fastapi import Response
 from nexusfeed.utils.metrics import latest_metrics, metrics_content_type
 
 app = FastAPI(title="NexusFeed API", version="0.1.0")
+
+# Mount static files directory (frontend folder)
+FRONTEND_DIR = BASE_DIR / "frontend"
+FRONTEND_DIR.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 # Global state for exchanges and tasks
 exchanges_list: list = []
@@ -518,8 +530,12 @@ async def health():
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
-    return {"name": "NexusFeed", "message": "Welcome to NexusFeed API"}
+    """Root endpoint - redirects to web interface."""
+    from fastapi.responses import FileResponse
+    index_path = FRONTEND_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path))
+    return {"name": "NexusFeed", "message": "Welcome to NexusFeed API", "docs": "/docs"}
 
 
 @app.get("/api/exchanges")
@@ -676,6 +692,408 @@ async def fetch_ticker(exchange_name: str, symbol: str):
             "message": str(exc),
             "exchange": exchange_name,
             "symbol": symbol,
+        }
+
+
+@app.get("/api/v1/exchanges/configured")
+async def list_configured_exchanges():
+    """
+    List only exchanges that are configured in the project (from exchanges folder).
+    Returns only exchanges that have integration files.
+    """
+    try:
+        from exchanges.loader import EXCHANGE_CLASS_MAP
+        
+        # Get only configured exchanges from EXCHANGE_CLASS_MAP
+        configured_exchanges = sorted(list(EXCHANGE_CLASS_MAP.keys()))
+        
+        return {
+            "total_exchanges": len(configured_exchanges),
+            "exchanges": configured_exchanges,
+            "message": "These are the exchanges with integration in this project"
+        }
+    except Exception as e:
+        return {
+            "error": "Failed to list configured exchanges",
+            "message": str(e)
+        }
+
+
+@app.get("/api/v1/exchanges/available")
+async def list_available_exchanges():
+    """
+    List all available exchanges from CCXT.
+    Returns a list of exchange names that can be used with NexusFeed.
+    """
+    try:
+        # Get all exchange names from CCXT
+        all_exchanges = ccxt.exchanges
+        
+        # Get exchanges that are configured in the system
+        configured_exchanges = list(EXCHANGES.keys())
+        
+        # Get exchanges that are supported by gomarket API
+        gomarket_exchanges = list(API_EXCHANGE_INSTRUMENT_MAP.keys())
+        gomarket_exchanges.extend(GOMARKET_API_SYMBOL_ROUTES.keys())
+        
+        return {
+            "total_exchanges": len(all_exchanges),
+            "available_exchanges": sorted(all_exchanges),
+            "configured_exchanges": configured_exchanges,
+            "gomarket_supported": sorted(set(gomarket_exchanges)),
+            "message": "Use /api/v1/exchanges/{exchange_name}/symbols to get symbols for an exchange"
+        }
+    except Exception as e:
+        return {
+            "error": "Failed to list exchanges",
+            "message": str(e)
+        }
+
+
+@app.get("/api/v1/exchanges/{exchange_name}/instrument-types")
+async def get_exchange_instrument_types(exchange_name: str):
+    """
+    Get available instrument types for a specific exchange.
+    
+    Args:
+        exchange_name: Name of the exchange (e.g., 'binance', 'binance_spot', 'binance_usdm')
+    
+    Returns:
+        List of available instrument types for this exchange
+    """
+    try:
+        final_exchange_name = exchange_name.lower()
+        
+        # Handle exchange name variations (e.g., binance_spot -> binance)
+        # Map exchange name to gomarket API format
+        if exchange_name in GOMARKET_API_SYMBOL_ROUTES:
+            final_exchange_name = GOMARKET_API_SYMBOL_ROUTES[exchange_name]
+        elif "_" in final_exchange_name:
+            # Try to extract base exchange name (e.g., binance_spot -> binance)
+            base_name = final_exchange_name.split("_")[0]
+            if base_name in API_EXCHANGE_INSTRUMENT_MAP:
+                final_exchange_name = base_name
+        
+        # Get available instrument types for this exchange
+        instrument_types = API_EXCHANGE_INSTRUMENT_MAP.get(
+            final_exchange_name, ["spot"]
+        )
+        
+        # If exchange name has a specific type (e.g., binance_spot), filter to that type
+        if "_" in exchange_name.lower():
+            parts = exchange_name.lower().split("_")
+            if len(parts) > 1:
+                specific_type = parts[1]
+                # Map common variations
+                type_mapping = {
+                    "spot": "spot",
+                    "usdm": "usdm_futures",
+                    "coinm": "coinm_futures",
+                    "futures": "futures",
+                    "margin": "margin",
+                }
+                mapped_type = type_mapping.get(specific_type, specific_type)
+                if mapped_type in instrument_types:
+                    instrument_types = [mapped_type]
+        
+        # Create user-friendly labels
+        type_labels = {
+            "spot": "Spot",
+            "futures": "Futures",
+            "future": "Futures",
+            "swap": "Perpetual Swap",
+            "perpetual": "Perpetual",
+            "linear": "Linear Futures",
+            "inverse": "Inverse Futures",
+            "margin": "Margin",
+            "option": "Options",
+            "option_combo": "Option Combo",
+            "future_combo": "Future Combo",
+            "usdm_futures": "USD-M Futures",
+            "coinm_futures": "Coin-M Futures",
+            "ccy_pair": "Currency Pair",
+            "perpetual_swap": "Perpetual Swap",
+            "all": "All Types"
+        }
+        
+        return {
+            "exchange": exchange_name,
+            "instrument_types": [
+                {
+                    "value": inst_type,
+                    "label": type_labels.get(inst_type, inst_type.replace("_", " ").title())
+                }
+                for inst_type in instrument_types
+            ]
+        }
+    except Exception as e:
+        return {
+            "error": f"Failed to fetch instrument types for {exchange_name}",
+            "message": str(e),
+            "exchange": exchange_name
+        }
+
+
+@app.get("/api/v1/exchanges/{exchange_name}/symbols")
+async def get_exchange_symbols(
+    exchange_name: str,
+    instrument_type: Optional[str] = Query("spot", description="Type of instrument (spot, futures, swap, etc.)"),
+    all_types: bool = Query(False, description="If true, return symbols for all instrument types")
+):
+    """
+    Get all symbols for a specific exchange using the gomarket API.
+    
+    Args:
+        exchange_name: Name of the exchange (e.g., 'binance', 'okx', 'bybit')
+        instrument_type: Type of instrument (e.g., 'spot', 'futures', 'swap'). Default: 'spot'
+        all_types: If True, return symbols for all instrument types. Default: False
+    
+    Returns:
+        List of symbols with their details (name, base, quote, etc.)
+    """
+    try:
+        if all_types:
+            # Get symbols for all instrument types
+            result = await get_all_instrument_types_for_exchange(exchange_name)
+            total_symbols = sum(len(symbols) for symbols in result.values())
+            return {
+                "exchange": exchange_name,
+                "total_symbols": total_symbols,
+                "instrument_types": {
+                    inst_type: {
+                        "count": len(symbols),
+                        "symbols": symbols
+                    }
+                    for inst_type, symbols in result.items()
+                }
+            }
+        else:
+            # Get symbols for specific instrument type
+            symbols = await get_symbols_for_exchange(exchange_name, instrument_type)
+            return {
+                "exchange": exchange_name,
+                "instrument_type": instrument_type,
+                "total_symbols": len(symbols),
+                "symbols": symbols
+            }
+    except Exception as e:
+        return {
+            "error": f"Failed to fetch symbols for {exchange_name}",
+            "message": str(e),
+            "exchange": exchange_name,
+            "instrument_type": instrument_type
+        }
+
+
+@app.get("/api/v1/exchanges/{exchange_name}/symbols/ccxt")
+async def get_exchange_symbols_ccxt(exchange_name: str):
+    """
+    Get all symbols for a specific exchange using CCXT directly.
+    This is an alternative to the gomarket API endpoint.
+    
+    Args:
+        exchange_name: Name of the exchange (e.g., 'binance', 'okx', 'bybit')
+    
+    Returns:
+        List of all available symbols from CCXT for this exchange
+    """
+    try:
+        # Try to initialize the exchange
+        exchange = get_exchange(
+            exchange_name,
+            [],
+            sandbox=Config.SANDBOX_MODE,
+            **Config.get_exchange_credentials(exchange_name),
+        )
+        
+        # Load markets
+        markets = await asyncio.to_thread(exchange.get_markets)
+        
+        # Extract symbols
+        symbols = [symbol for symbol in markets.keys() if "/" in symbol]
+        
+        # Get market details
+        market_details = []
+        for symbol in symbols:
+            market = markets.get(symbol, {})
+            market_details.append({
+                "symbol": symbol,
+                "base": market.get("base"),
+                "quote": market.get("quote"),
+                "active": market.get("active", True),
+                "type": market.get("type", "spot"),
+                "spot": market.get("spot", False),
+                "margin": market.get("margin", False),
+                "swap": market.get("swap", False),
+                "future": market.get("future", False),
+                "option": market.get("option", False),
+            })
+        
+        return {
+            "exchange": exchange_name,
+            "total_symbols": len(symbols),
+            "symbols": sorted(symbols),
+            "market_details": market_details
+        }
+    except ValueError as e:
+        return {
+            "error": f"Exchange '{exchange_name}' not supported",
+            "message": str(e),
+            "available_exchanges": list(EXCHANGES.keys())
+        }
+    except Exception as e:
+        return {
+            "error": f"Failed to fetch symbols for {exchange_name}",
+            "message": str(e),
+            "exchange": exchange_name
+        }
+
+
+@app.get("/api/v1/exchanges/{exchange_name}/market-data/{symbol:path}")
+async def get_market_data(exchange_name: str, symbol: str):
+    """
+    Get comprehensive market data for a specific exchange and symbol.
+    Returns ticker, orderbook, recent trades, and market information.
+    
+    Args:
+        exchange_name: Name of the exchange (e.g., 'binance', 'okx', 'bybit')
+        symbol: Trading pair symbol (e.g., BTC/USDT or BTCUSDT)
+    
+    Returns:
+        Complete market data including ticker, orderbook, trades, and market info
+    """
+    try:
+        # Initialize the exchange
+        exchange = get_exchange(
+            exchange_name,
+            [],
+            sandbox=Config.SANDBOX_MODE,
+            **Config.get_exchange_credentials(exchange_name),
+        )
+        
+        # Normalize the symbol
+        normalized_symbol = normalize_symbol(symbol)
+        
+        # Load markets to get market info
+        markets = await asyncio.to_thread(exchange.get_markets)
+        market_info = markets.get(normalized_symbol, {})
+        
+        # Fetch all market data concurrently
+        ticker_task = asyncio.to_thread(exchange.get_ticker, normalized_symbol)
+        orderbook_task = asyncio.to_thread(exchange.get_orderbook, normalized_symbol, 20)
+        trades_task = asyncio.to_thread(exchange.get_trades, normalized_symbol, 20)
+        
+        ticker, orderbook, trades = await asyncio.gather(
+            ticker_task,
+            orderbook_task,
+            trades_task,
+            return_exceptions=True
+        )
+        
+        # Handle errors for each data type
+        ticker_data = ticker if not isinstance(ticker, Exception) else None
+        orderbook_data = orderbook if not isinstance(orderbook, Exception) else None
+        trades_data = trades if not isinstance(trades, Exception) else None
+        
+        # Prepare response
+        response = {
+            "exchange": exchange_name,
+            "symbol": normalized_symbol,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "market_info": {
+                "base": market_info.get("base"),
+                "quote": market_info.get("quote"),
+                "active": market_info.get("active", True),
+                "type": market_info.get("type", "spot"),
+                "spot": market_info.get("spot", False),
+                "margin": market_info.get("margin", False),
+                "swap": market_info.get("swap", False),
+                "future": market_info.get("future", False),
+                "option": market_info.get("option", False),
+                "precision": {
+                    "amount": market_info.get("precision", {}).get("amount"),
+                    "price": market_info.get("precision", {}).get("price"),
+                },
+                "limits": {
+                    "amount": market_info.get("limits", {}).get("amount", {}),
+                    "price": market_info.get("limits", {}).get("price", {}),
+                    "cost": market_info.get("limits", {}).get("cost", {}),
+                },
+            },
+            "ticker": None,
+            "orderbook": None,
+            "trades": None,
+            "errors": {}
+        }
+        
+        # Add ticker data
+        if ticker_data:
+            response["ticker"] = {
+                "symbol": ticker_data.get("symbol"),
+                "last": ticker_data.get("last"),
+                "bid": ticker_data.get("bid"),
+                "ask": ticker_data.get("ask"),
+                "high": ticker_data.get("high"),
+                "low": ticker_data.get("low"),
+                "open": ticker_data.get("open"),
+                "close": ticker_data.get("close"),
+                "volume": ticker_data.get("volume"),
+                "quoteVolume": ticker_data.get("quoteVolume"),
+                "change": ticker_data.get("change"),
+                "percentage": ticker_data.get("percentage"),
+                "vwap": ticker_data.get("vwap"),
+                "timestamp": ticker_data.get("timestamp"),
+                "datetime": ticker_data.get("datetime"),
+            }
+        else:
+            response["errors"]["ticker"] = str(ticker) if isinstance(ticker, Exception) else "Failed to fetch"
+        
+        # Add orderbook data
+        if orderbook_data:
+            response["orderbook"] = {
+                "symbol": orderbook_data.get("symbol"),
+                "bids": orderbook_data.get("bids", [])[:10],  # Top 10 bids
+                "asks": orderbook_data.get("asks", [])[:10],  # Top 10 asks
+                "timestamp": orderbook_data.get("timestamp"),
+                "datetime": orderbook_data.get("datetime"),
+                "nonce": orderbook_data.get("nonce"),
+            }
+        else:
+            response["errors"]["orderbook"] = str(orderbook) if isinstance(orderbook, Exception) else "Failed to fetch"
+        
+        # Add trades data
+        if trades_data:
+            response["trades"] = [
+                {
+                    "id": trade.get("id"),
+                    "timestamp": trade.get("timestamp"),
+                    "datetime": trade.get("datetime"),
+                    "symbol": trade.get("symbol"),
+                    "type": trade.get("type"),
+                    "side": trade.get("side"),
+                    "price": trade.get("price"),
+                    "amount": trade.get("amount"),
+                    "cost": trade.get("cost"),
+                }
+                for trade in (trades_data[:20] if isinstance(trades_data, list) else [])
+            ]
+        else:
+            response["errors"]["trades"] = str(trades) if isinstance(trades, Exception) else "Failed to fetch"
+        
+        return response
+        
+    except ValueError as e:
+        return {
+            "error": f"Exchange '{exchange_name}' not supported",
+            "message": str(e),
+            "available_exchanges": list(EXCHANGES.keys())
+        }
+    except Exception as e:
+        return {
+            "error": f"Failed to fetch market data for {exchange_name}/{symbol}",
+            "message": str(e),
+            "exchange": exchange_name,
+            "symbol": symbol
         }
 
 

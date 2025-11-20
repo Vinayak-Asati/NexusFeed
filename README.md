@@ -303,11 +303,44 @@ When using the REST API endpoint `/api/exchanges/{exchange_name}/ticker/{symbol}
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/` | Root endpoint with API information |
+| GET | `/` | Root endpoint - serves web interface |
 | GET | `/health` | Health check endpoint |
 | GET | `/api/exchanges` | List all configured exchanges |
 | GET | `/api/exchanges/status` | Get status and connectivity for all exchanges |
 | GET | `/api/exchanges/{exchange_name}/ticker/{symbol}` | Fetch ticker data for a specific exchange and symbol |
+| GET | `/api/v1/exchanges/available` | List all available exchanges from CCXT |
+| GET | `/api/v1/exchanges/{exchange_name}/symbols` | Get all symbols for an exchange using gomarket API |
+| GET | `/api/v1/exchanges/{exchange_name}/symbols/ccxt` | Get all symbols for an exchange using CCXT directly |
+
+### Web Interface
+
+NexusFeed includes a modern web interface accessible at the root URL (`/`). The interface allows you to:
+- Browse all available exchanges from CCXT
+- Select an exchange to view its symbols
+- Filter symbols by instrument type (spot, futures, swap, etc.)
+- View all symbol types for an exchange at once
+
+### New Features
+
+#### Exchange Symbol Browser
+
+The new symbol browser endpoints use the **gomarket API** to fetch comprehensive symbol lists for any exchange:
+
+1. **List Available Exchanges**: `/api/v1/exchanges/available`
+   - Returns all exchanges supported by CCXT
+   - Shows which exchanges are configured in NexusFeed
+   - Indicates which exchanges are supported by gomarket API
+
+2. **Get Exchange Symbols**: `/api/v1/exchanges/{exchange_name}/symbols`
+   - Fetches symbols using the gomarket API
+   - Supports filtering by instrument type (spot, futures, swap, etc.)
+   - Can return all instrument types with `?all_types=true`
+   - Example: `/api/v1/exchanges/binance/symbols?instrument_type=spot`
+
+3. **Get Exchange Symbols (CCXT)**: `/api/v1/exchanges/{exchange_name}/symbols/ccxt`
+   - Alternative endpoint that uses CCXT directly
+   - Returns detailed market information for each symbol
+   - Useful for getting real-time market data structure
 
 ### Example API Requests
 
@@ -317,6 +350,18 @@ curl http://localhost:8000/api/exchanges
 
 # Get exchange status
 curl http://localhost:8000/api/exchanges/status
+
+# List all available exchanges from CCXT
+curl http://localhost:8000/api/v1/exchanges/available
+
+# Get all spot symbols for Binance using gomarket API
+curl http://localhost:8000/api/v1/exchanges/binance/symbols?instrument_type=spot
+
+# Get all symbol types for Bybit
+curl http://localhost:8000/api/v1/exchanges/bybit/symbols?all_types=true
+
+# Get symbols for OKX using CCXT directly
+curl http://localhost:8000/api/v1/exchanges/okx/symbols/ccxt
 
 # Fetch ticker for Binance BTC/USDT
 curl http://localhost:8000/api/exchanges/binance/ticker/BTC/USDT
