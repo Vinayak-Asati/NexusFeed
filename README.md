@@ -1,6 +1,8 @@
 # NexusFeed: Market Data Aggregator & Normalizer
 [Live Demo](https://nexusfeed.onrender.com)
 
+[Demo Recording](https://drive.google.com/file/d/1089GNizlydiUlbu1AcKnabF2JS2SFiur/view?usp=drive_link)
+
 ## Overview
 
 **NexusFeed** is a real-time cryptocurrency market data aggregator that collects, normalizes, and stores ticker data from multiple exchanges. The system connects to various exchange APIs concurrently, fetches market data at configurable intervals, and saves the data in standardized CSV and JSON formats.
